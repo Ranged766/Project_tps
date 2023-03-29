@@ -6,79 +6,69 @@ import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.security.NoSuchAlgorithmException;
 
+import Chiper.Chacha20;
 import operazioni.Operazione;
+import standard.BytesPacchettoCriptato;
 import standard.Pacchetto;
 import view.GestionePannelli;
 
-//classe che gestisce lo scambio di pacchetti del client
 public class ClientMain extends Thread {
 	
-	//variabile socket per connettersi al server
 	private Socket connection;
-	
-	//input&outputStream
 	private ObjectInputStream input;
 	private ObjectOutputStream output;
-	
-	//variabile utilizzata per indicare il vincitore
 	public int winner;
-	
-	//variabile utilizzata per indicare il paddle utilizzato
 	public int id;
-	
-	//variabile utilizzata per evitare il ripetersi delle richieste di start
 	public boolean inGame1;
-	
-	//public String name;
-	//public String opponentName;
-	
-	//variabili utilizzate per ricevere pacchetti e ricordare le coordinate
 	public Pacchetto pacchetto;
 	public Pacchetto coordinate;
-	
-	//parte grafica
+	public Chacha20 chacha;
 	public GestionePannelli gp;
 
-	public ClientMain() {
+	public ClientMain() throws NoSuchAlgorithmException {
 		
-		//imposto le varibili con dei valori di base
 		coordinate = new Pacchetto(-1, -1, -1, -1, -1, Operazione.NACK);
 		inGame1 = false;
 		winner = 0;
 		
 		try {
-			//provo a connettermi al server (indirizzo da modificare se non si usa lo stesso pc)
+			chacha=new Chacha20();
 			connection = new Socket(InetAddress.getLocalHost(), 20000);
-			
-			//stampo a video il menu
 			gp = new GestionePannelli();
-			
-			//creo gli ObjectStream 
 			output = new ObjectOutputStream(connection.getOutputStream());
 			input = new ObjectInputStream(connection.getInputStream());
-			
-			//faccio partire il Thread
 			this.start();
 		} catch (UnknownHostException e) {
-			//indirizzo inserito in connection non è valido
 			System.out.println("UnknownHostException");
 		} catch (IOException e) {
-			//non si sono riusciti a creare gli ObjectStream
 			System.out.println("Connsessione non riuscita");
 		}
 	}
 
 	public void run() {
 		try {
-			/*parte riguardo al nome (temporaneamente tolta)
-			while (!gp.start) {
-				name = gp.m.getTxtName();
-				//try { sleep(1000); } catch (InterruptedException e) { e.printStackTrace(); }
-				//System.out.println("wait " + name + " game: " + gp.start);
-			}*/
-
-			//ciclo che attende la propria richiesta venga accettata
+			boolean fla=false;
+			while(!fla) {
+				Object risposta = null;
+				try {
+					risposta = input.readObject();
+				} catch (IOException | ClassNotFoundException e) {
+					e.printStackTrace();
+				}
+				Chacha20 cha = (Chacha20) risposta;
+				if (!(cha instanceof Chacha20)) {
+					System.out.println("risposta: non era un cha cha");
+				}
+				else {
+					chacha=cha;
+					System.out.println("questo Ã¨ il chacha inviato dal server:"+ chacha.toString());
+					fla=true;
+					output.writeObject(Operazione.ACK);
+				}
+			}
+			
 			boolean flag = false;
 			System.out.println("richiesta di startare");
 			while (!flag && !inGame1) {
@@ -86,48 +76,39 @@ public class ClientMain extends Thread {
 			}
 			System.out.println("richiesta accettata");
 
-			//ciclo che attende la partita cominci
 			boolean flag1 = false;
 			System.out.println("attesa di startare");
 			while (!flag1 && !inGame1) {
 				flag1 = waitToStart();
 			}
 
-			//passaggio al pannello di gioco
 			System.out.println("partita iniziata");
 			gp.startGame(id, coordinate);
 			inGame1 = true;
 
-			//conversazione tra il client ed il server
 			System.out.println("comincia la conversazione");
 			conversazione();
 			System.out.println("finisce la conversazione");
 
-			//annuncio del vincitore e passaggio al pannello finale
 			gp.endGame(id, winner);
 			System.out.println("cambia schermata");
 
-			//chiudo la connessione e gli ObjectStream
 			input.close();
 			output.close();
 			connection.close();
 		} catch (IOException e) {
-			System.out.println("C'è stato un errore negli ObjectStream");
+			System.out.println("C'ï¿½ stato un errore negli ObjectStream");
 		}
 	}
 	
-	//richiesta di partecipazione ad una partita
 	public boolean requestToStart() {
 		try {
-			try {
-				sleep(100);
-			} catch (InterruptedException e1) {
-				System.out.println("errore nello sleep");
-			}
-			pacchetto = new Pacchetto(-1, -1, -1, -1, 0, Operazione.Ready, " "/*name*/);
+			pacchetto = new Pacchetto(-1, -1, -1, -1, 0, Operazione.Ready);
 			System.out.println("pacchetto iniziale:" + pacchetto.toString());
 			try {
-				output.writeObject(pacchetto);
+				byte[] st = chacha.PacchettoCripter(pacchetto);
+				BytesPacchettoCriptato bpc = new BytesPacchettoCriptato(st);
+				output.writeObject(bpc);
 			} catch (IOException e) {
 				System.out.println("errore nell'invio del pacchetto");
 			}
@@ -138,12 +119,16 @@ public class ClientMain extends Thread {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			Pacchetto pch = (Pacchetto) risposta;
+			
+			//da byte a pacchetto, s Ã¨ null
+			BytesPacchettoCriptato s = (BytesPacchettoCriptato)risposta;
+			Pacchetto pch = new Pacchetto();
+			pch = chacha.PacchettoDecripter(s.getB());
+			
 			if (!(pch instanceof Pacchetto)) {
 				System.out.println("risposta requestToStart: non era un pacchetto");
 			} else {
 				System.out.println("pacchetto di ACK:" + pch.toString());
-				// ricevo operazione di ack più il nome dell'avversario
 				if (pch.operazione.equals(Operazione.ACK)) {
 					id = pch.id;
 					coordinate = new Pacchetto(pch.yPaddle1, pch.yPaddle2, pch.xBall, pch.yBall, pch.id,
@@ -175,7 +160,11 @@ public class ClientMain extends Thread {
 			} catch (IOException e) {
 				System.out.println("waitToStart: errore nella lettura");
 			}
-			Pacchetto pch = (Pacchetto) risposta;
+			
+			//da byte a pacchetto
+			BytesPacchettoCriptato s = (BytesPacchettoCriptato)risposta;
+			Pacchetto pch = new Pacchetto();
+			pch = chacha.PacchettoDecripter(s.getB());
 
 			if (!(pch instanceof Pacchetto)) {
 				System.out.println("waitToStart: non era un pacchetto");
@@ -202,7 +191,6 @@ public class ClientMain extends Thread {
 		return false;
 	}
 
-	//scambio di dati tra server e client (scambio pacchetti contenenti coordinate)
 	public void conversazione() {
 		boolean inGame = true;
 		try {
@@ -213,28 +201,35 @@ public class ClientMain extends Thread {
 			}
 			while (inGame) {
 				try {
-					// client invia le proprie coordinate
 					coordinate = updateCoordinate();
-					System.out.println("coordinate:" + coordinate.toString());
-					output.writeObject(coordinate);
+					//System.out.println("coordinate:" + coordinate.toString());
+					
+					BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+					st.setB(chacha.PacchettoCripter(coordinate));
+					output.writeObject(st);
 
 					Object risposta = null;
 					risposta = input.readObject();
-					Pacchetto pch = (Pacchetto) risposta;
+					
+					//da byte a pacchetto
+					BytesPacchettoCriptato s = (BytesPacchettoCriptato)risposta;
+					Pacchetto pch = new Pacchetto();
+					pch = chacha.PacchettoDecripter(s.getB());
+					
 					if (!(pch instanceof Pacchetto)) {
 						System.out.println("risposta non era un pacchetto");
 					} else {
-						System.out.println("pacchetto ricevuto: " + pch.toString());
+						//System.out.println("pacchetto ricevuto: " + pch.toString());
 						if (pch.operazione.equals(Operazione.inGame)) {
 							updateBall(pch);
-							System.out.println("coordinate in Game: " + coordinate.toString());
+							//System.out.println("coordinate in Game: " + coordinate.toString());
 							gp.gm.updateCoordinate(pch);
 						} else if (pch.operazione.equals(Operazione.Score)) {
 							System.out.println("qualcuno ha segnato");
 							gp.gm.updateCoordinate(pch);
 							gp.gm.updateScore(pch.id);
 						} else if (pch.operazione.equals(Operazione.Stop)) {
-							System.out.println("il tuo avversario oppure il server si è disconnesso");
+							System.out.println("il tuo avversario oppure il server si ï¿½ disconnesso");
 							inGame = false;
 							gp.gm.SetFinishedGame();
 						} else if (pch.operazione.equals(Operazione.Win)) {
@@ -279,7 +274,7 @@ public class ClientMain extends Thread {
 	}
 
 	//main
-	public static void main(String[] args) {
+	public static void main(String[] args) throws NoSuchAlgorithmException {
 		new ClientMain();
 	}
 }

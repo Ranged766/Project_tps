@@ -5,9 +5,12 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
+import java.security.NoSuchAlgorithmException;
 import java.util.Random;
 
+import Chiper.Chacha20;
 import operazioni.Operazione;
+import standard.BytesPacchettoCriptato;
 import standard.Dimensioni;
 import standard.Pacchetto;
 import standard.StatusGame;
@@ -20,11 +23,12 @@ public class Connection extends Thread {
 	public int id;
 	public StatusGame sg;
 	public Pacchetto pacchetto;
-	// potrei anche toglierla questa variabile coordinate
 	public Pacchetto coordinate;
+	public Chacha20 chacha;
 
-	public Connection(Socket richiestaClient, StatusGame sg1) {
+	public Connection(Socket richiestaClient, StatusGame sg1, Chacha20 chacha) throws NoSuchAlgorithmException {
 		this.sg = sg1;
+		this.chacha = chacha;
 		System.out.println(sg);
 		this.sg.numPlayer++;
 		id = this.sg.numPlayer;
@@ -47,6 +51,38 @@ public class Connection extends Thread {
 
 	public synchronized void run() {
 		try {
+			boolean flag=false;
+			while(!flag) {
+				//invio della chiave
+				if (id == 1) {
+					sg.oos1.writeObject(chacha);
+				} else {
+					sg.oos2.writeObject(chacha);
+				}
+				System.out.println("server ha inviato:"+chacha.toString());
+				
+				//ricezione conferma chiave
+				Object risposta = null;
+				try {
+					if (id == 1) {
+						risposta = sg.ois1.readObject();
+					} else {
+						risposta = sg.ois2.readObject();
+					}
+				} catch (ClassNotFoundException e1) {
+					e1.printStackTrace();
+				}
+				//qua ritorna un oggetto BytesPacchettoCrittato
+				Operazione op = (Operazione) risposta;
+				if (op instanceof Operazione) {
+					flag=true;
+				}
+				else {
+					System.out.println("no ack");
+				}
+			}
+			
+			
 			while (true) {
 				Object risposta = null;
 				try {
@@ -55,17 +91,21 @@ public class Connection extends Thread {
 					} else {
 						risposta = sg.ois2.readObject();
 					}
-
+					
 				} catch (ClassNotFoundException e1) {
 					e1.printStackTrace();
 				}
-
-				Pacchetto pch = (Pacchetto) risposta;
+				
+				//da byte a pacchetto
+				BytesPacchettoCriptato s = (BytesPacchettoCriptato)risposta;
+				Pacchetto pch = new Pacchetto();
+				pch = chacha.PacchettoDecripter(s.getB());
+				
 				if (!(pch instanceof Pacchetto)) {
 					System.out.println("pch non era un pacchetto");
 				} else {
 
-					System.out.println("il thread numero " + id + " ha ricevuto: " + pch.toString());
+					//System.out.println("il thread numero " + id + " ha ricevuto: " + pch.toString());
 
 					if (pch.operazione.equals(Operazione.Ready) && !sg.paddle1InGame && !sg.paddle2InGame) {
 						System.out.println("ricezione pacchetto ready:" + pch.toString());
@@ -88,9 +128,13 @@ public class Connection extends Thread {
 							System.out.println("invio pacchetto ack:" + pacchetto.toString());
 							try {
 								if (id == 1) {
-									sg.oos1.writeObject(pacchetto);
+									BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+									st.setB(chacha.PacchettoCripter(pacchetto));
+									sg.oos1.writeObject(st);
 								} else {
-									sg.oos2.writeObject(pacchetto);
+									BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+									st.setB(chacha.PacchettoCripter(pacchetto));
+									sg.oos2.writeObject(st);
 								}
 							} catch (IOException e) {
 								System.out.println("errore nell'invio pacchetto ack");
@@ -115,38 +159,48 @@ public class Connection extends Thread {
 									// invia ai client un messaggio di start
 									if (id == 1) {
 										sg.paddle1InGame = true;
-										sg.oos1.writeObject(pacchetto);
-										sg.oos2.writeObject(pacchetto);
+										BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+										st.setB(chacha.PacchettoCripter(pacchetto));
+										sg.oos1.writeObject(st);
+										sg.oos2.writeObject(st);
 									} else {
 										sg.paddle2InGame = true;
-										sg.oos1.writeObject(pacchetto);
-										sg.oos2.writeObject(pacchetto);
+										BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+										st.setB(chacha.PacchettoCripter(pacchetto));
+										sg.oos1.writeObject(st);
+										sg.oos2.writeObject(st);
 									}
 								} catch (IOException e) {
 									System.out.println("errore nell'invio del pacchetto di start");
 								}
 							}
 						} else {
-							System.out.println("non c'è posto per te fra");
+							System.out.println("non c'ï¿½ posto per te fra");
 							// modalita spettatore, da implementare se voglio
 						}
 					} else if (pch.operazione.equals(Operazione.inGame)) {
 						pacchetto = calcolaCoordinate(pch);
-						System.out.println("pacchetto post calcolaCoordinate: " + pacchetto.toString());
+						//System.out.println("pacchetto post calcolaCoordinate: " + pacchetto.toString());
 						try {
 							// invia al client un messaggio di inGame
 							if (pacchetto.operazione.equals(Operazione.Score)) {
-								sg.oos1.writeObject(pacchetto);
-								sg.oos2.writeObject(pacchetto);
+								BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+								st.setB(chacha.PacchettoCripter(pacchetto));
+								sg.oos1.writeObject(st);
+								sg.oos2.writeObject(st);
 							} else {
 								if (id == 1) {
-									sg.oos1.writeObject(pacchetto);
+									BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+									st.setB(chacha.PacchettoCripter(pacchetto));
+									sg.oos1.writeObject(st);
 								} else {
-									sg.oos2.writeObject(pacchetto);
+									BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+									st.setB(chacha.PacchettoCripter(pacchetto));
+									sg.oos2.writeObject(st);
 								}
 							}
 							coordinate = pacchetto;
-							System.out.println("pacchetto inviato al client:" + pacchetto.toString());
+							//System.out.println("pacchetto inviato al client:" + pacchetto.toString());
 						} catch (IOException e) {
 						}
 					} else if (pch.operazione.equals(Operazione.Stop)) {
@@ -155,9 +209,13 @@ public class Connection extends Thread {
 								(d.GAME_HEIGHT / 2) - (d.BALL_DIAMETER / 2), id, Operazione.Stop);
 						try {
 							if (id == 1) {
-								sg.oos1.writeObject(pacchetto);
+								BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+								st.setB(chacha.PacchettoCripter(pacchetto));
+								sg.oos1.writeObject(st);
 							} else {
-								sg.oos2.writeObject(pacchetto);
+								BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+								st.setB(chacha.PacchettoCripter(pacchetto));
+								sg.oos2.writeObject(st);
 							}
 						} catch (IOException e) {
 							System.out.println("Exception scrittura pacchetto");
@@ -168,9 +226,8 @@ public class Connection extends Thread {
 					} catch (InterruptedException e) {
 						e.printStackTrace();
 					}
-					System.out.println("situazione di gioco:" + sg.toString());
+					//System.out.println("situazione di gioco:" + sg.toString());
 				}
-				// in caso di vittoria
 				if (sg.scorePaddle1 == d.puntiVittoria || sg.scorePaddle2 == d.puntiVittoria) {
 					if (sg.scorePaddle1 > sg.scorePaddle2) {
 						pacchetto = new Pacchetto((d.GAME_HEIGHT / 2) - (d.PADDLE_HEIGHT / 2),
@@ -183,8 +240,10 @@ public class Connection extends Thread {
 					}
 					try {
 						if (id == 1) {
-							sg.oos1.writeObject(pacchetto);
-							sg.oos2.writeObject(pacchetto);
+							BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+							st.setB(chacha.PacchettoCripter(pacchetto));
+							sg.oos1.writeObject(st);
+							sg.oos2.writeObject(st);
 						}
 					} catch (IOException e) {
 						System.out.println("Exception scrittura pacchetto");
@@ -192,12 +251,17 @@ public class Connection extends Thread {
 				}
 			}
 		} catch (IOException e) {
-			System.out.println("Un client si è disconnesso, stò terminando la partita");
+			System.out.println("Un client si ï¿½ disconnesso, stï¿½ terminando la partita");
 			try {
 				if (id == 2) {
-					sg.oos1.writeObject(new Pacchetto(1, 1, 1, 1, 1, Operazione.Stop));
-				} else {
-					sg.oos2.writeObject(new Pacchetto(1, 1, 1, 1, 2, Operazione.Stop));
+					BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+					st.setB(chacha.PacchettoCripter(new Pacchetto(1, 1, 1, 1, 1, Operazione.Stop)));
+					sg.oos1.writeObject(st);
+				}
+				if (id == 1 && sg.oos2 != null) {
+					BytesPacchettoCriptato st = new BytesPacchettoCriptato(null);
+					st.setB(chacha.PacchettoCripter(new Pacchetto(1, 1, 1, 1, 2, Operazione.Stop)));
+					sg.oos2.writeObject(st);
 				}
 			} catch (IOException e1) {
 				System.out.println("Connection Reset By Peer");
@@ -299,7 +363,7 @@ public class Connection extends Thread {
 			sg.yPaddle2 = (d.GAME_HEIGHT / 2) - (d.PADDLE_HEIGHT / 2);
 		}
 
-		System.out.println("YVelocity:" + sg.yVelocity);
-		System.out.println("XVelocity:" + sg.xVelocity);
+		//System.out.println("YVelocity:" + sg.yVelocity);
+		//System.out.println("XVelocity:" + sg.xVelocity);
 	}
 }

@@ -1,11 +1,13 @@
 package operazioni;
 
-public enum Operazione {
+import java.io.Serializable;
+
+public enum Operazione implements Serializable{
     Ready,	// Il client annuncia di essere pronto per lo scambio di dati
     
-    Start,	// Il server annuncia che la partita è cominciata
+    Start,	// Il server annuncia che la partita ï¿½ cominciata
     
-    Stop,	// Il server annuncia che la partita è chiusa
+    Stop,	// Il server annuncia che la partita ï¿½ chiusa
     
     Score,	// Il server annuncia un punto, insieme all'id di chi ha segnato
     
